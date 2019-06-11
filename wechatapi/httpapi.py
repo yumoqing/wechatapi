@@ -1,63 +1,60 @@
+import aiohttp
 
-import urllib.request, urllib.parse, urllib.error
-import urllib.request, urllib.error, urllib.parse
-import json
-import logging
-import traceback
+RESPONSE_BIN = 0
+RESPONSE_TEXT = 1
+RESPONSE_JSON = 2
+RESPONSE_FILE = 3
 
-def _get(url: object, api: object = None, timeout: object = None) -> object:
-	request = urllib.request.Request(url=url)
-	request.add_header('Referer', 'https://wx.qq.com/')
-	if api in [ 'webwxgetvoice', 'webwxgetvideo' ]:
-		request.add_header('Range', 'bytes=0-')
-	try:
-		response = urllib.request.urlopen(request, timeout=timeout) if timeout else urllib.request.urlopen(request)
-		if api == 'webwxgetvoice' or api == 'webwxgetvideo':
-			data = response.read()
-		else:
-			data = response.read().decode('utf-8')
-		logging.debug(url)
-		return data
-	except urllib.error.HTTPError as e:
-		logging.error('HTTPError = ' + str(e.code))
-	except urllib.error.URLError as e:
-		logging.error('URLError = ' + str(e.reason))
-	except http.client.HTTPException as e:
-		logging.error('HTTPException')
-	except timeout_error as e:
-		pass
-	except ssl.CertificateError as e:
-		pass
-	except Exception:
-		import traceback
-		logging.error('generic exception: ' + traceback.format_exc())
-	return ''
+class HttpClient:
+	def __init__(self,coding='utf-8')
+		self.coding = coding
+		self.sessions = {}
+		self.cookies = {}
 
-def _post(url: object, params: object, jsonfmt: object = True) -> object:
-	if jsonfmt:
-		data = (json.dumps(params)).encode()
+	def url2domain(self,url):
+		parts = url.split('/')[:3]
+		pre = '/'.join(parts)
+		return pre
 		
-		request = urllib.request.Request(url=url, data=data)
-		request.add_header(
-			'ContentType', 'application/json; charset=UTF-8')
-	else:
-		request = urllib.request.Request(url=url, data=urllib.parse.urlencode(params).encode(encoding='utf-8'))
+	def saveCookies(self,url,cookies):
+		name = self.url2domain(url)
+		self.cookies[name] = cookies
 
+	def getCookies(self,url):
+		name = url2domain(url)
+		return self.cookies.get(name)
 
-	try:
-		response = urllib.request.urlopen(request)
-		data = response.read()
-		if jsonfmt:
-			return json.loads(data.decode('utf-8') )#object_hook=_decode_dict)
-		return data
-	except urllib.error.HTTPError as e:
-		logging.error('HTTPError = ' + str(e.code))
-	except urllib.error.URLError as e:
-		logging.error('URLError = ' + str(e.reason))
-	except http.client.HTTPException as e:
-		logging.error('HTTPException')
-	except Exception:
-		logging.error('generic exception: ' + traceback.format_exc())
+	def getsession(self,url):
+		if url.startswith('http'):
+			pre = self.url2domain(url)
+			s = self.sessions.get(pre)
+			if s is None:
+				self.sessions[pre] = aiohttp.ClientSession()
+				s = self.sessions.get(pre)
+			self.lastSession = s
+			return s
+		return self.lastSession
+				
+	async def handleResp(resp,method):
+		if resp.cookies is not None:
+			self.setCookie(resp.url,resp.cookies)
 
-	return ''
+		if method == RESPONSE_TEXT:
+			return await resp.text(self.coding)
+		if method == RESPONSE_BIN:
+			return await resp.read()
+		if method == RESPONSE_JSON:
+			return await resp.json()
+
+	async def get(self,url,params={},headers={},method=RESPONSE_TEXT):
+		session = self.getsession(url)
+		resp = await session.get(url,params=params,headers=headers)
+		if resp.status==200:
+			return await self.handleResp(resp,method)
+
+	async def post(self,url,data=b'',headers={}):
+		session = self.getsession(url)
+		resp = await session.post(url,data=data,headers=headers)
+		if resp.status==200:
+			return await self.handleResp(resp,method)
 
